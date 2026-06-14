@@ -1,0 +1,12 @@
+axiom:
+  target: dev
+  outputs:
+    dev:
+      type: postgres
+      host: "{{ env_var('PG_HOST', 'postgres') }}"
+      port: 5432
+      user: "{{ env_var('PG_USER', 'axiom') }}"
+      password: "{{ env_var('PG_PASSWORD', 'axiom') }}"
+      dbname: "{{ env_var('PG_DB', 'axiom') }}"
+      schema: analytics
+      threads: 4

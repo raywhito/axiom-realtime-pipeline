@@ -1,0 +1,7 @@
+# Airflow image with dbt-postgres installed (orchestrates the transformation layer).
+FROM apache/airflow:2.9.3-python3.11
+
+# dbt runs inside the Airflow worker via BashOperator.
+# Pin dbt-core to the stable 1.8 line — without this, pip may pull the
+# Rust-based "dbt Fusion" (2.0.x alpha) which does not support PostgreSQL.
+RUN pip install --no-cache-dir "dbt-core==1.8.7" "dbt-postgres==1.8.2"

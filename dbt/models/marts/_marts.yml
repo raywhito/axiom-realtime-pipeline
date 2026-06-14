@@ -1,0 +1,26 @@
+version: 2
+
+models:
+  - name: fct_wearable_metric
+    description: "Event-grain fact of validated wearable readings"
+    columns:
+      - name: event_id
+        tests:
+          - not_null
+          - unique
+      - name: user_id
+        tests:
+          - not_null
+      - name: event_date
+        tests:
+          - not_null
+
+  - name: agg_user_daily_metric
+    description: "Per-user, per-day, per-metric aggregates"
+    columns:
+      - name: readings
+        tests:
+          - not_null
+      - name: avg_value
+        tests:
+          - not_null

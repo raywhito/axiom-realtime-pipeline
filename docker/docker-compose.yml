@@ -1,0 +1,162 @@
+# ════════════════════════════════════════════════════════════════════════════
+# AXIOM Real-Time Pipeline — local stack (Block 3)
+# Run from the repo root:  make up
+# ════════════════════════════════════════════════════════════════════════════
+name: axiom-realtime
+
+services:
+  # ── Streaming backbone ─────────────────────────────────────────────────────
+  redpanda:
+    image: redpandadata/redpanda:v24.1.7
+    container_name: rt-redpanda
+    command:
+      - redpanda
+      - start
+      - --kafka-addr=internal://0.0.0.0:9092,external://0.0.0.0:19092
+      - --advertise-kafka-addr=internal://redpanda:9092,external://localhost:19092
+      - --rpc-addr=redpanda:33145
+      - --advertise-rpc-addr=redpanda:33145
+      - --mode=dev-container
+      - --smp=1
+      - --default-log-level=warn
+    ports:
+      - "19092:19092"   # external Kafka API (host tools)
+      - "9644:9644"     # admin + Prometheus metrics
+    healthcheck:
+      test: ["CMD-SHELL", "rpk cluster health | grep -q 'Healthy:.*true'"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+    restart: unless-stopped
+
+  redpanda-console:
+    image: redpandadata/console:v2.6.0
+    container_name: rt-redpanda-console
+    environment:
+      KAFKA_BROKERS: redpanda:9092
+    ports:
+      - "8080:8080"
+    depends_on:
+      redpanda:
+        condition: service_healthy
+    restart: unless-stopped
+
+  # ── Storage (landing + warehouse + Airflow metadata) ───────────────────────
+  postgres:
+    image: postgres:16
+    container_name: rt-postgres
+    environment:
+      POSTGRES_USER: ${PG_USER:-axiom}
+      POSTGRES_PASSWORD: ${PG_PASSWORD:-axiom}
+      POSTGRES_DB: ${PG_DB:-axiom}
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+      - ../sql:/docker-entrypoint-initdb.d:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${PG_USER:-axiom} -d ${PG_DB:-axiom}"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+    restart: unless-stopped
+
+  # ── Streaming ingestion ────────────────────────────────────────────────────
+  producer:
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile.app
+    container_name: rt-producer
+    command: ["python", "producer.py"]
+    environment:
+      REDPANDA_BROKER: redpanda:9092
+      TARGET_EPS: ${TARGET_EPS:-20}
+      INVALID_RATE: ${INVALID_RATE:-0.05}
+    ports:
+      - "8001:8001"
+    depends_on:
+      redpanda:
+        condition: service_healthy
+    restart: unless-stopped
+
+  consumer:
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile.app
+    container_name: rt-consumer
+    command: ["python", "consumer.py"]
+    environment:
+      REDPANDA_BROKER: redpanda:9092
+      PG_HOST: postgres
+      PG_USER: ${PG_USER:-axiom}
+      PG_PASSWORD: ${PG_PASSWORD:-axiom}
+      PG_DB: ${PG_DB:-axiom}
+    ports:
+      - "8002:8002"
+    depends_on:
+      redpanda:
+        condition: service_healthy
+      postgres:
+        condition: service_healthy
+    restart: unless-stopped
+
+  # ── Orchestration (Airflow standalone + dbt) ───────────────────────────────
+  airflow:
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile.airflow
+    container_name: rt-airflow
+    command:
+      - bash
+      - -c
+      - "airflow db migrate &&
+         (airflow users create -r Admin -u admin -p admin -e admin@axiom.local -f Admin -l User || true) &&
+         airflow standalone"
+    environment:
+      AIRFLOW__CORE__EXECUTOR: LocalExecutor
+      AIRFLOW__CORE__LOAD_EXAMPLES: "false"
+      AIRFLOW__DATABASE__SQL_ALCHEMY_CONN: postgresql+psycopg2://${PG_USER:-axiom}:${PG_PASSWORD:-axiom}@postgres:5432/airflow
+      AIRFLOW__CORE__DAGS_FOLDER: /opt/airflow/dags
+      DBT_PROFILES_DIR: /opt/airflow/dbt
+      PG_HOST: postgres
+      PG_USER: ${PG_USER:-axiom}
+      PG_PASSWORD: ${PG_PASSWORD:-axiom}
+      PG_DB: ${PG_DB:-axiom}
+    volumes:
+      - ../dags:/opt/airflow/dags:ro
+      - ../dbt:/opt/airflow/dbt
+    ports:
+      - "8085:8080"     # Airflow UI (admin / admin)
+    depends_on:
+      postgres:
+        condition: service_healthy
+    restart: unless-stopped
+
+  # ── Observability ──────────────────────────────────────────────────────────
+  prometheus:
+    image: prom/prometheus:v2.53.0
+    container_name: rt-prometheus
+    volumes:
+      - ./prometheus/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+    ports:
+      - "9090:9090"
+    restart: unless-stopped
+
+  grafana:
+    image: grafana/grafana:11.1.0
+    container_name: rt-grafana
+    environment:
+      GF_SECURITY_ADMIN_USER: ${GRAFANA_ADMIN_USER:-admin}
+      GF_SECURITY_ADMIN_PASSWORD: ${GRAFANA_ADMIN_PASSWORD:-admin}
+      GF_USERS_ALLOW_SIGN_UP: "false"
+    volumes:
+      - ./grafana/provisioning:/etc/grafana/provisioning:ro
+      - ./grafana/dashboards:/var/lib/grafana/dashboards:ro
+      - grafanadata:/var/lib/grafana
+    ports:
+      - "3000:3000"
+    depends_on:
+      - prometheus
+    restart: unless-stopped
+
+volumes:
+  pgdata:
+  grafanadata:

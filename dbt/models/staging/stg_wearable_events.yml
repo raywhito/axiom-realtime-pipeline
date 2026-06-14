@@ -1,0 +1,26 @@
+version: 2
+
+models:
+  - name: stg_wearable_events
+    description: "Cleaned, de-duplicated wearable telemetry"
+    columns:
+      - name: event_id
+        description: "Unique event identifier"
+        tests:
+          - not_null
+          - unique
+      - name: user_id
+        tests:
+          - not_null
+      - name: metric
+        tests:
+          - not_null
+          - accepted_values:
+              values: ["hrv", "resting_hr", "sleep_hours", "steps", "spo2"]
+      - name: device
+        tests:
+          - accepted_values:
+              values: ["oura", "apple_watch", "whoop"]
+      - name: value
+        tests:
+          - not_null

@@ -1,0 +1,15 @@
+version: 2
+
+sources:
+  - name: landing
+    schema: landing
+    description: "Raw landing zone populated by the streaming consumer"
+    tables:
+      - name: wearable_events
+        description: "Validated wearable telemetry events"
+        loaded_at_field: ingested_at
+        freshness:
+          warn_after: { count: 10, period: minute }
+          error_after: { count: 60, period: minute }
+      - name: dead_letter
+        description: "Events rejected by ingestion validation"
